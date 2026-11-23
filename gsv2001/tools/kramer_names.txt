@@ -1,0 +1,59 @@
+# address name  # note            (Kramer IP5000-A30 V0.0.20 image, base 0x08006000)
+0800a628 AvApiCreateDevice          # (device, type, index, &descriptor, first port, 0); type 1 = Gsv2k1
+0800a640 AvApiAddPort               # (device, port, id, kind)
+0800a688 AvApiConnectPort           # (source, sink, what): 0 video, 1 audio, 2 both
+0800a7ca AvApiInit
+0800a7d8 AvApiInitDevice            # runs the chip driver's init
+0800a7e6 AvApiInitPort
+0800a848 AvApiAllocPortContent
+0800aba0 AvApiInitPorts
+0800abc0 AvApiUpdate                # one pass over all ports: the main loop calls this
+0800c450 AvFsmCec
+0800c80c AvFsmPlugRx                # Rx plug state machine
+0800ca7c AvFsmPlugTx                # Tx plug state machine
+0800ce54 AvFsmRx                    # Rx receive state machine
+0800cf88 read_block                 # (dev, reg, count, buffer)
+0800cfb8 gsv_read_field
+0800d098 gsv_read_bits
+0800d0d0 write_block                # (dev, reg, count, buffer)
+0800d100 gsv_write_field
+0800d210 gsv_write_bits
+0800d26c AvUapiEvent                # (port, event, a, b): Kramer's application answers here
+0800ed40 AvApiHookUserFunctions     # (key, uart, irda) command listeners
+0800ed60 AvMemcpy
+0800ed80 AvMemset
+0800ed9c AvAlloc                    # bump allocator for the port content blocks
+0800f0c0 AvApiHookBspFunctions      # (i2c read, i2c write, uart tx, uart rx, get ms, get key, get irda)
+0800f1e8 gsv_log
+0801384c Gsv2k1Init                 # reset, init table, Rx PLL, Rx-port table
+08013960 Gsv2k1ResetPort            # Rx: HPD off + equaliser reset; Tx: core reset + output off
+080168e8 Gsv2k1TxResetCore
+08014570 Gsv2k1RxHdcpStatus
+08014cdc Gsv2k1RxLockTrack          # 5 V, lock, clock, audio, packet flags; once per pass
+08015828 Gsv2k1RxCheckLock
+080159bc Gsv2k1RxReadIntpt
+08015edc Gsv2k1RxReadTiming
+08016120 Gsv2k1RxReset
+08016290 Gsv2k1RxPowerUp
+08016248 Gsv2k1RxPowerDown
+080167f4 Gsv2k1TxCipherDisable
+08017110 Gsv2k1TxHdcpPoll
+080175a8 Gsv2k1TxPlug               # HPD, PLL lock, pixel clock, drive strength, SCDC, mutes; once per pass
+080181dc Gsv2k1TxReadEdid
+08018718 Gsv2k1TxCaps
+080187f8 Gsv2k1TxHdmiMode
+08018d68 Gsv2k1RxDisableHpa
+08018eac Gsv2k1RxEnableHpa
+08019004 Gsv2k1TxReadBksv
+08019360 Gsv2k1PllKick
+080194c0 Gsv2k1RxEqualiser
+08019a00 Gsv2k1TxHdcpSetType
+08019c10 Gsv2k1TxSetTmds
+08019cd8 Gsv2k1TxToggleHpd
+08019dd4 Gsv2k1TxActiveCount
+08019f14 Gsv2k1TxDdcByte            # (port, write, address, offset, value)
+080124fc Gsv2k1ConnectPort          # the routing writes: page 1 reg 9 / reg 5, page 0 reg 8
+0802edf0 AvKapiTxEdidManage
+0802f4fc AvKapiNextDownstream
+0802f566 AvKapiRootSource
+0802f73a AvKapiRxDetectCheck

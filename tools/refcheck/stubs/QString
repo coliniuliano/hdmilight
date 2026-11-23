@@ -1,0 +1,30 @@
+#pragma once
+#include <string>
+#include <vector>
+#include <sstream>
+/* Minimal stand-in for QString: only what HyperHDR's math sources touch. */
+class QStringList;
+class QString {
+public:
+    std::string s;
+    QString() {}
+    QString(const char *c) : s(c) {}
+    QString(const std::string &x) : s(x) {}
+    template <class T> QString arg(const T &, int = 0, int = 0, char = ' ') const { return *this; }
+    template <class T> static QString number(T v, char = 'g', int = 6) { std::ostringstream o; o << v; return QString(o.str()); }
+    std::string toStdString() const { return s; }
+    QString operator+(const QString &o) const { return QString(s + o.s); }
+    bool isEmpty() const { return s.empty(); }
+    QStringList split(const char *) const;
+};
+inline QString operator+(const char *a, const QString &b) { return QString(std::string(a) + b.s); }
+class QStringList : public std::vector<QString> {
+public:
+    void append(const QString &q) { push_back(q); }
+    void append(const QStringList &l) { insert(end(), l.begin(), l.end()); }
+    QStringList &operator<<(const QString &q) { push_back(q); return *this; }
+    QString join(const char *sep) const { std::string r; for (size_t i = 0; i < size(); i++) { if (i) r += sep; r += (*this)[i].s; } return QString(r); }
+    QStringList split(const char *) const { return *this; }
+};
+
+inline QStringList QString::split(const char *) const { QStringList l; l.push_back(*this); return l; }

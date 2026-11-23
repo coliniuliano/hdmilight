@@ -1,0 +1,172 @@
+menu "hdmilight-v3"
+
+    choice HL_BOARD
+        prompt "Board"
+        default HL_BOARD_DEVKIT
+        config HL_BOARD_DEVKIT
+            bool "Dev kit with an external HDMI splitter and a USB grabber"
+        config HL_BOARD_ONEBOARD
+            bool "Oneboard, revision A (GSV2001 + MS2130 + ESP32-S31 on one board)"
+            depends on IDF_TARGET_ESP32S31
+            help
+                The ESP32-S31 also runs the splitter (GSV2001 over I2C) and manages the capture chip (MS2130:
+                core supply, boot flash). Pins are fixed by the board: main/oneboard.h.
+                Build with firmware/idf-oneboard.sh, which keeps this build's directory and sdkconfig apart.
+    endchoice
+
+    config HL_ONEBOARD_I2C_HZ
+        int "Oneboard: I2C clock to the GSV2001 (Hz)"
+        depends on HL_BOARD_ONEBOARD
+        default 400000
+        range 10000 400000
+
+    config HL_ONEBOARD_TV_PASSTHROUGH
+        bool "Oneboard: the TV output is a pass-through of the input"
+        depends on HL_BOARD_ONEBOARD
+        default y
+        help
+            Off puts the TV output on the splitter's one Tx core, which it then shares with the capture chip's output.
+
+    config HL_ONEBOARD_SCALE_CAPTURE
+        bool "Oneboard: downscale 4K inputs for the capture chip"
+        depends on HL_BOARD_ONEBOARD
+        default y
+
+    config HL_ONEBOARD_TV_HDCP
+        bool "Oneboard: encrypt the TV output (HDCP) when the input is encrypted"
+        depends on HL_BOARD_ONEBOARD
+        default n
+        help
+            Off: the splitter never starts HDCP towards the TV, as it never does towards the capture chip. The TV
+            then gets the picture with no HDCP handshake to fail or repeat. On: the driver's own behaviour.
+
+    config HL_ONEBOARD_TV_DRIVE
+        int "Oneboard: lowest output-driver setting for the TV output (0 to 2)"
+        depends on HL_BOARD_ONEBOARD
+        range 0 2
+        default 1
+        help
+            The splitter's driver picks one of three output-driver settings by clock: below 251 MHz, 251 to 340 MHz
+            and above. On this board the first gives no picture on the HDMI connector below 251 MHz, so 720p and
+            1080p were dark; gsv2001/sdk/gsv_tx.c records what was measured. This is the lowest setting the TV
+            output may use; 0 leaves the driver's choice.
+
+    config HL_ONEBOARD_EDID_NAME
+        string "Oneboard: display name shown to the source while no TV is connected"
+        depends on HL_BOARD_ONEBOARD
+        default "HDMI Light"
+        help
+            The monitor name in the built-in EDID, at most 13 characters. Once a TV is connected the source sees
+            the TV's own EDID and name instead. Empty keeps the name in the built-in EDID ("HDMI Light").
+
+    config HL_LED_GPIO
+        int "LED strip data GPIO"
+        default 6 if HL_BOARD_ONEBOARD
+        default 2 if IDF_TARGET_ESP32S31
+        default 5
+        help
+            ESP32-S31-Function-CoreBoard-1: GPIO2 is header J2 pin 7 (ground on pin 8). GPIO4 to GPIO19 go to the
+            board's Ethernet chip and GPIO50 to GPIO57 to its audio codec, so the P4 kits' GPIO5 is not usable there.
+
+    config HL_CONSOLE
+        bool "Serial console (type 'help' on the UART or the USB Serial/JTAG port)"
+        default y if IDF_TARGET_ESP32S31
+        default n
+        help
+            Bring-up aid for the S31 boards. Off on the P4 kits: the installed one is only reachable over Wi-Fi,
+            and the console takes over UART0 input.
+
+    choice HL_LED_MODEL
+        prompt "LED strip type"
+        default HL_LED_WS2812
+        config HL_LED_WS2812
+            bool "WS2812 / WS2815 (RGB, GRB order)"
+        config HL_LED_SK6812_RGBW
+            bool "SK6812 RGBW (GRBW order)"
+        config HL_LED_WS2811
+            bool "WS2811 (RGB order)"
+    endchoice
+
+    config HL_BRIGHTNESS_PCT
+        int "Global brightness cap (%)"
+        default 60
+        range 1 100
+        help
+            Scales every output. 94 WS2812 at full white draw ~5.6 A; keep this
+            below what your 5 V supply can deliver.
+
+    config HL_NO_SIGNAL_MS
+        int "Fade to black after this many ms without a frame"
+        default 2000
+
+    config HL_LED_TOP
+        int "LEDs along the top edge"
+        default 30
+    config HL_LED_RIGHT
+        int "LEDs along the right edge"
+        default 17
+    config HL_LED_BOTTOM
+        int "LEDs along the bottom edge"
+        default 30
+    config HL_LED_LEFT
+        int "LEDs along the left edge"
+        default 17
+
+    config HL_ZONE_DEPTH_PCT
+        int "Edge zone depth (% of frame)"
+        default 8
+        range 2 50
+
+    config HL_CAPTURE_WIDTH
+        int "Capture width"
+        default 640
+    config HL_CAPTURE_HEIGHT
+        int "Capture height"
+        default 480
+    config HL_CAPTURE_FPS
+        int "Capture frame rate"
+        default 30
+
+    config HL_CAPTURE_FRAME_KB
+        int "Max compressed frame size (KiB) per USB frame buffer"
+        default 512
+        range 128 2048
+
+    config HL_GRID_BLOCK
+        int "Grid block size (source pixels per cell)"
+        default 8
+
+    choice HL_HDR_MODE
+        prompt "HDR tone mapping"
+        default HL_HDR_AUTO
+        config HL_HDR_AUTO
+            bool "Automatic (HyperHDR-style detection)"
+        config HL_HDR_ON
+            bool "Always on"
+        config HL_HDR_OFF
+            bool "Off"
+    endchoice
+
+    config HL_TONEMAP_LUT_N
+        int "Tone-map LUT size per axis (baked at build time into flash, n^3 x 3 bytes)"
+        range 2 65
+        default 33
+
+    config HL_BLACKBORDER
+        bool "Black border detection"
+        default y
+
+    config HL_OUTPUT_HZ
+        int "LED output rate (Hz)"
+        default 50
+
+    config HL_WIFI
+        bool "Wi-Fi + web UI (on the ESP32-P4 through the board's ESP32-C6 via ESP-Hosted)"
+        default y
+
+    config HL_AP_PASSWORD
+        string "Setup access point password (8+ chars; empty = open network)"
+        depends on HL_WIFI
+        default "hdmilight"
+
+endmenu

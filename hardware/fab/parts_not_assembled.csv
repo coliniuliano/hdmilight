@@ -1,0 +1,9 @@
+Designator,Value,LCSC Part #,Why
+U2,GSV2001,,GSV2001 is out of stock at LCSC/JLCPCB: fit by hand with hot air
+R26,10k,C25804,do not fit: optional part
+R32,0R,C21189,do not fit: optional part
+U1,ESP32-S31-WROOM-1-N16R16V,,not in JLCPCB's library: fit by hand with hot air
+J5,DEBUG,C37208,through-hole: solder by hand
+J4,LED 3P 5.08,C441205,through-hole header KF2EDGR-5.08-3P: solder by hand; the mating plug is KF2EDGK-5.08-3P
+C70,1uF,C15849,do not fit: optional part
+R55,1k,C21190,do not fit: optional part

@@ -1,0 +1,57 @@
+diff -ruN a/host/mcu/eh_host_mcu_transport/src/eh_host_bus_sdio.c b/host/mcu/eh_host_mcu_transport/src/eh_host_bus_sdio.c
+--- a/host/mcu/eh_host_mcu_transport/src/eh_host_bus_sdio.c	2026-11-07 21:34:07
++++ b/host/mcu/eh_host_mcu_transport/src/eh_host_bus_sdio.c	2026-11-07 21:34:07
+@@ -1353,13 +1353,24 @@
+ 	uint8_t ** buf = &double_buf.buffer[index].buf;
+ 
+ 	if (len > double_buf.buffer[index].buf_size) {
+-		/* A completed target is the CP's contract for every subsequent
+-		 * aggregate. Do not silently resize after a staging hand-off. */
++		/* hdmilight patch: upstream 3.1.0 returns NULL here once the staging
++		 * target is set ("the CP's contract"). sdio_read_task then skips the
++		 * read without consuming it, the CP offers the same aggregate on the
++		 * next interrupt, and it is refused again forever: Wi-Fi RX is dead
++		 * until a power-cycle (seen on an ESP32-P4 with a C6 whose old
++		 * firmware streams but sends no SDIO_MODE TLV, so the target was one
++		 * 1536-byte frame). Grow the slot instead, as 3.0.10 always did. Safe
++		 * in streaming mode: `head` is the read task's own unpublished slot,
++		 * and the drain task memcpy's every frame out of a slot, never keeping
++		 * a pointer into it. */
+ 		if (sdio_rx_staging_prealloc_done) {
+-			ESP_LOGE(TAG, "SDIO RX read (%lu bytes) exceeds staging target (%lu bytes)",
+-			         (unsigned long)len,
+-			         (unsigned long)double_buf.buffer[index].buf_size);
+-			return NULL;
++			static uint32_t warned_len;
++			if (len > warned_len) {
++				warned_len = len;
++				ESP_LOGW(TAG, "SDIO RX read (%lu bytes) exceeds staging target (%lu bytes); growing slot (hdmilight patch)",
++				         (unsigned long)len,
++				         (unsigned long)double_buf.buffer[index].buf_size);
++			}
+ 		}
+ 		if (*buf) {
+ 			eh_host_port_dma_free(*buf);
+diff -ruN a/host/mcu/eh_host_mcu_transport/src/eh_host_mcu_transport_init_event.c b/host/mcu/eh_host_mcu_transport/src/eh_host_mcu_transport_init_event.c
+--- a/host/mcu/eh_host_mcu_transport/src/eh_host_mcu_transport_init_event.c	2026-11-07 21:34:07
++++ b/host/mcu/eh_host_mcu_transport/src/eh_host_mcu_transport_init_event.c	2026-11-07 21:34:07
+@@ -417,6 +417,19 @@
+             ESP_LOGW(TAG, "SDIO RX staging buffers stay dynamic; a later alloc may fail");
+             target_size = 0;
+         }
++# ifdef CONFIG_ESP_HOSTED_HOST_SDIO_RX_STREAMING_MODE
++        /* hdmilight patch: no SDIO_MODE TLV means CP firmware older than
++         * esp-hosted-mcu 2.11.7, not a packet-mode CP. Those builds stream by
++         * default (since Feb 2024) and the host reads everything the CP has
++         * queued in one CMD53, so one frame (MAX_SDIO_BUFFER_SIZE) is the
++         * wrong target: the first aggregate of two frames would not fit.
++         * Treat it like the unknown-queue-size case above: dynamic staging,
++         * which is what 3.0.10 did for every CP. */
++        if (!saw_sdio_mode_tlv && !eh_host_mcu_transport_sdio_sw_aggr_negotiated()) {
++            ESP_LOGW(TAG, "CP sent no SDIO_MODE TLV: staging buffers stay dynamic (hdmilight patch)");
++            target_size = 0;
++        }
++# endif
+         eh_host_bus_sdio_set_rx_staging_target(target_size);
+     }
+ #endif

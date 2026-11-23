@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hdmilight</title>
+<style>
+  :root { --bg:#111; --fg:#ddd; --mute:#888; --acc:#5ad; --card:#1b1b1b; --ok:#6c6; --bad:#e66; }
+  body { margin:0; font:14px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:12px 16px; border-bottom:1px solid #222; display:flex; justify-content:space-between; align-items:baseline; }
+  .bar { max-width:960px; margin:0 auto; padding:8px 16px 0; display:flex; flex-wrap:wrap; align-items:center; gap:8px 14px; }
+  .bar .slider { display:flex; align-items:center; gap:8px; flex:1 1 220px; color:var(--mute); font-size:12px; }
+  .bar input[type=range] { flex:1; width:auto; min-width:120px; padding:0; accent-color:var(--acc); }
+  .bar output { color:var(--fg); font-variant-numeric:tabular-nums; min-width:3.2em; text-align:right; }
+  button.on { outline:2px solid var(--ok); }
+  button.off { background:var(--bad); color:#000; }
+  header b { font-size:16px; }
+  main { max-width:960px; margin:0 auto; padding:12px 16px; display:grid; gap:12px; grid-template-columns:1fr; }
+  @media (min-width:760px) { main { grid-template-columns:1fr 1fr; } .wide { grid-column:1 / -1; } }
+  section { background:var(--card); border-radius:8px; padding:12px 14px; }
+  h2 { margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--mute); }
+  .row { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; }
+  label { display:flex; flex-direction:column; gap:2px; font-size:12px; color:var(--mute); }
+  input, select { background:#000; color:var(--fg); border:1px solid #333; border-radius:4px; padding:5px 7px; font-size:14px; width:7em; }
+  input[type=text], input[type=password] { width:12em; }
+  input[type=color] { width:3.2em; height:2.1em; padding:2px; }
+  button { background:var(--acc); color:#000; border:0; border-radius:4px; padding:7px 12px; font-weight:600; cursor:pointer; }
+  button.sec { background:#333; color:var(--fg); }
+  .stat { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-variant-numeric:tabular-nums; }
+  .stat > span:nth-child(odd) { color:var(--mute); }
+  canvas { width:100%; max-width:480px; display:block; background:#000; border-radius:6px; }
+  /* the grabber frame sits inside the LED ring: ring margin 14 + depth 22 of a 480x300 canvas */
+  .live { position:relative; width:100%; max-width:640px; }
+  .live canvas { max-width:none; }
+  .live img { position:absolute; left:7.5%; top:12%; width:85%; height:76%; object-fit:fill; background:#000; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  #msg { color:var(--mute); font-size:12px; min-height:1.4em; }
+  .hint { color:var(--mute); font-size:12px; margin:6px 0 0; }
+  #wstate { margin:0 0 10px; }
+  #wstate a { color:var(--acc); }
+  #ssid_sel { width:19em; max-width:100%; }
+  .unit { display:flex; align-items:center; gap:4px; color:var(--mute); font-size:14px; }
+  .row.end { align-items:flex-end; }
+  button:disabled { opacity:.5; cursor:default; }
+</style>
+</head>
+<body>
+<header><b>hdmilight-v3</b><span id="net">…</span></header>
+<div class="bar">
+  <button id="pwr" onclick="setOutput(st.out_mode===1?0:1)">…</button>
+  <button id="live" class="sec" onclick="setOutput(0)">Live</button>
+  <button id="solid" class="sec" onclick="setOutput(2, $('ovr').value)">Colour</button>
+  <input type="color" id="ovr" value="#ffffff" onchange="setOutput(2, this.value)" title="Solid colour override">
+  <label class="slider">Brightness<input type="range" id="bri" min="1" max="100" oninput="$('briv').value=this.value+' %'" onchange="setBrightness(Number(this.value))"><output id="briv">…</output></label>
+</div>
+<main>
+  <section class="wide">
+    <h2>Live</h2>
+    <div class="live">
+      <canvas id="ring" width="480" height="300"></canvas>
+      <img id="frame" alt="grabber frame">
+    </div>
+    <div class="stat" id="stat"></div>
+  </section>
+
+  <section>
+    <h2>LED layout</h2>
+    <div class="row">
+      <label>Top<input id="top" type="number" min="0" max="300"></label>
+      <label>Right<input id="right" type="number" min="0" max="300"></label>
+      <label>Bottom<input id="bottom" type="number" min="0" max="300"></label>
+      <label>Left<input id="left" type="number" min="0" max="300"></label>
+      <label>Edge depth %<input id="depth_pct" type="number" min="2" max="50"></label>
+    </div>
+    <p class="hint">Clockwise from the top-left corner. Run the self-test and watch the chase to check direction.</p>
+  </section>
+
+  <section>
+    <h2>Strip</h2>
+    <div class="row">
+      <label>Type<select id="led_type"><option value="0">WS2812 / WS2815</option><option value="1">SK6812 RGBW</option><option value="2">WS2811</option></select></label>
+      <label>Colour order<select id="color_order"><option value="0">GRB</option><option value="1">RGB</option><option value="2">BRG</option><option value="3">RBG</option><option value="4">GBR</option><option value="5">BGR</option></select></label>
+      <label>Data GPIO<input id="gpio" type="number" min="0" max="63"></label>
+    </div>
+    <div class="row" style="margin-top:8px"><button class="sec" onclick="post('/api/selftest')">Self-test</button></div>
+    <p class="hint">Order check: set the header colour to pure red; if the strip shows green, pick RGB.</p>
+  </section>
+
+  <section>
+    <h2>Picture</h2>
+    <div class="row">
+      <label>HDR tone map<select id="hdr_mode"><option value="0">Auto</option><option value="1">On</option><option value="2">Off</option></select></label>
+      <label>Black borders<select id="blackborder"><option value="true">Detect</option><option value="false">Off</option></select></label>
+      <label>Grid block px<input id="block" type="number" min="2" max="40"></label>
+    </div>
+  </section>
+
+  <section>
+    <h2>Smoothing</h2>
+    <div class="row">
+      <label>Stiffness<input id="smooth_stiffness" type="number" min="1" max="2000"></label>
+      <label>Damping<input id="smooth_damping" type="number" min="1" max="500"></label>
+      <label>No-signal fade ms<input id="no_signal_ms" type="number" min="200" max="60000"></label>
+    </div>
+    <p class="hint">HyperHDR defaults: 150 / 26. Lower stiffness = slower, lower damping = bouncier.</p>
+  </section>
+
+  <section class="wide">
+    <h2>Colour</h2>
+    <div class="row">
+      <label>Gamma<input id="gamma" type="number" min="0.1" max="5" step="0.05"></label>
+      <label>Luminance<input id="luminance" type="number" min="0" max="3" step="0.05"></label>
+      <label>Saturation<input id="saturation" type="number" min="0" max="3" step="0.05"></label>
+      <label>Scale<input id="scale" type="number" min="0" max="2" step="0.05"></label>
+      <label>Backlight %<input id="backlight_pct" type="number" min="0" max="50" step="0.01"></label>
+      <label>Backlight<select id="backlight_colored"><option value="true">Coloured</option><option value="false">Grey</option></select></label>
+      <label>Power limit %<input id="power_limit_pct" type="number" min="1" max="100"></label>
+    </div>
+    <div class="row">
+      <label>Temperature<select id="temp_preset"><option value="0">Off</option><option value="1">Cold</option><option value="2">Neutral</option><option value="3">Warm</option><option value="4">Custom</option></select></label>
+      <label>Custom R %<input id="temp_r" type="number" min="0" max="200"></label>
+      <label>G %<input id="temp_g" type="number" min="0" max="200"></label>
+      <label>B %<input id="temp_b" type="number" min="0" max="200"></label>
+    </div>
+    <p class="hint">HyperHDR defaults: gamma 1.5, gains 1, backlight 0.39 %.</p>
+  </section>
+
+  <section class="wide">
+    <div class="row" style="justify-content:space-between">
+      <div class="row"><button onclick="saveCfg()">Save &amp; apply</button><button class="sec" onclick="loadCfg()">Reload</button><span id="msg"></span></div>
+      <button class="sec" onclick="if(confirm('Reboot?'))post('/api/reboot')">Reboot</button>
+      <label class="sec" style="display:inline-block">Update firmware <input type="file" id="fw" accept=".bin" onchange="uploadFw(this.files[0])"></label>
+    </div>
+  </section>
+
+  <section class="wide" id="boardsec" style="display:none">
+    <h2>Board</h2>
+    <div class="stat" id="bstat"></div>
+    <div class="row" style="margin-top:10px">
+      <button onclick="tvPower('on')">TV on</button>
+      <button class="sec" onclick="tvPower('off')">TV off</button>
+      <label>LEDs when the TV is off<select id="cec_follow" style="width:auto" onchange="setCec('follow', this.value)"><option value="0">Stay on</option><option value="1">Fade out</option></select></label>
+      <button class="sec" onclick="if(confirm('Switch the capture chip off and on again?'))bpost('/api/ms2130?power=cycle')">Restart capture chip</button>
+      <button class="sec" onclick="spiId()">Flash ID over SPI</button>
+      <label class="sec" style="display:inline-block">Write capture firmware over SPI <input type="file" accept=".bin" onchange="spiWrite(this.files[0]); this.value=''"></label>
+      <span id="bmsg" class="hint"></span>
+    </div>
+    <p class="hint">The TV counts as off once its HDMI hot-plug has been down for half a second. "TV on" and "TV off" send CEC Image View On and Standby; CEC must be enabled on the TV. The SPI route switches the capture chip off while it runs.</p>
+  </section>
+
+  <section class="wide" id="usbsec" style="display:none">
+    <h2>Capture chip firmware (USB)</h2>
+    <div class="row">
+      <button class="sec" onclick="usbJob('read')">Read flash</button>
+      <a id="usbdump" href="/api/ms2130/usb/dump" download="ms2130_flash.bin" style="display:none;color:var(--acc)">Download the dump</a>
+      <label class="sec" style="display:inline-block">Write image <input type="file" accept=".bin" onchange="usbJob('write', this.files[0]); this.value=''"></label>
+      <span id="usbmsg" class="hint"></span>
+    </div>
+    <p class="hint">Reads or rewrites the MS2130's boot flash through its USB port (works with a blank flash too). Reading changes nothing; writing erases the flash first, and an image that fails its checksums is refused.</p>
+  </section>
+
+  <section class="wide">
+    <h2>Log</h2>
+    <pre id="log" style="max-height:260px;overflow:auto;background:#000;padding:8px;border-radius:6px;font-size:11px;white-space:pre-wrap;margin:0"></pre>
+  </section>
+
+  <section class="wide">
+    <h2>Wi-Fi</h2>
+    <p id="wstate">…</p>
+    <div class="row end">
+      <label>Network<select id="ssid_sel" onchange="pickNet()"></select></label>
+      <label id="ssid_lbl" hidden>Network name<input id="ssid" type="text" autocapitalize="none" autocomplete="off" oninput="pickNet()"></label>
+      <label>Password<input id="pass" type="password" autocomplete="off"></label>
+      <button class="sec" id="scanbtn" onclick="scan()">Rescan</button>
+    </div>
+    <div class="row end" style="margin-top:8px">
+      <label>Hostname<span class="unit"><input id="hostname" type="text" maxlength="31" autocapitalize="none" autocomplete="off" oninput="hostHint()">.local</span></label>
+      <button id="joinbtn" onclick="joinWifi()">Save &amp; join</button>
+      <span id="wmsg" class="hint" style="margin:0"></span>
+    </div>
+    <p class="hint" id="whint"></p>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const fields = ['top','right','bottom','left','depth_pct','led_type','color_order','gpio','hdr_mode','blackborder','block','smooth_stiffness','smooth_damping','no_signal_ms',
+  'gamma','luminance','saturation','scale','backlight_pct','backlight_colored','power_limit_pct','temp_preset'];
+const boolFields = ['blackborder','backlight_colored'];
+let cfg = null;
+async function get(u){ const r = await fetch(u); if(!r.ok) throw new Error(u+' '+r.status); return r.json(); }
+async function post(u, body, msgId='msg'){ try { const r = await fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:body?JSON.stringify(body):undefined}); const t = await r.text(); let j = {}; try { j = JSON.parse(t); } catch(e){} if(!r.ok) throw new Error(j.error||t||r.statusText); $(msgId).textContent = j.note || 'ok'; return j; } catch(e){ $(msgId).textContent = 'error: '+e.message; } }
+const esc = t => String(t).replace(/[&<>"']/g, ch => '&#'+ch.charCodeAt(0)+';');
+async function loadCfg(){ cfg = await get('/api/config'); for (const f of fields){ const el=$(f); if(!el) continue; el.value = String(cfg[f]); } $('gpio').disabled = !!cfg.gpio_fixed; $('gpio').title = cfg.gpio_fixed ? 'Wired on this board' : ''; $('bri').value = cfg.brightness_pct; $('briv').value = cfg.brightness_pct+' %'; ['temp_r','temp_g','temp_b'].forEach((id,i)=>$(id).value=cfg.temp_rgb[i]); $('hostname').value = cfg.hostname; fillNets(); hostHint(); $('msg').textContent='loaded'; }
+async function saveCfg(){ const b={}; for (const f of fields){ const el=$(f); if(!el) continue; b[f] = boolFields.includes(f) ? el.value==='true' : Number(el.value); } b.temp_rgb = ['temp_r','temp_g','temp_b'].map(id=>Number($(id).value)); const j = await post('/api/config', b); if (j) { cfg=j; $('msg').textContent='saved & applied'; } }
+let st = {out_mode:0};
+async function setOutput(mode, rgb){ const j = await post('/api/output', rgb ? {mode, rgb} : {mode}); if (j) { st.out_mode = j.mode; showOutput(); } }
+async function setBrightness(v){ const j = await post('/api/config', {brightness_pct:v}); if (j) { cfg = j; $('msg').textContent = 'brightness '+v+' %'; } }
+function showOutput(){ const off = st.out_mode===1; $('pwr').textContent = off ? 'Turn on' : 'Turn off'; $('pwr').className = off ? 'off' : ''; $('live').className = 'sec'+(st.out_mode===0?' on':''); $('solid').className = 'sec'+(st.out_mode===2?' on':''); }
+// ---- Wi-Fi panel. The list always holds the saved network and "Other network…"; a scan adds what is in range.
+const OTHER = '\u0000other';
+let nets = null, scanning = false, scanErr = false, scanned = false;
+const chosenSsid = () => $('ssid_sel').value === OTHER ? $('ssid').value.trim() : $('ssid_sel').value;
+function fillNets(keep){ const sel=$('ssid_sel'), saved=cfg.wifi_ssid||''; const want = keep!==undefined ? keep : saved; sel.textContent='';
+  const add=(text,value,off)=>{ const o=new Option(text,value); o.disabled=!!off; sel.add(o); return o; };
+  const seen = nets||[];
+  if (saved && !seen.some(a=>a.ssid===saved)) add(saved+' (saved'+(nets?', not in range':'')+')', saved);
+  for (const a of seen) add(a.ssid+(a.ssid===saved?' (saved)':'')+' · '+a.rssi+' dBm'+(a.open?' · open':''), a.ssid);
+  if (scanning) add('Looking for networks…','',true); else if (scanErr) add('Scan failed: press Rescan','',true); else if (nets && !nets.length) add('No networks found','',true);
+  add('Other network…', OTHER);
+  sel.value = [...sel.options].some(o=>o.value===want && !o.disabled) ? want : (saved || (seen[0] && seen[0].ssid) || OTHER);
+  pickNet(); }
+function pickNet(){ const other = $('ssid_sel').value===OTHER; $('ssid_lbl').hidden = !other; const name = chosenSsid(), a = (nets||[]).find(x=>x.ssid===name);
+  const p=$('pass'); p.disabled = !!(a && a.open); if (p.disabled) p.value='';
+  p.placeholder = p.disabled ? 'open network' : (name && name===cfg.wifi_ssid ? 'saved: blank keeps it' : '');
+  $('joinbtn').disabled = !name; }
+function hostHint(){ const h=$('hostname'); h.value = h.value.toLowerCase().replace(/[^a-z0-9-]/g,''); const name = h.value || cfg.hostname;
+  $('whint').textContent = 'The board answers at http://'+name+'.local on the network it joins. If joining fails it brings its own setup network back (hdmilight-xxxx, password hdmilight).'; }
+async function scan(){ if (scanning) return; scanning = true; scanned = true; scanErr = false; $('scanbtn').disabled = true; $('scanbtn').textContent='Scanning…'; const keep = ($('ssid_sel').value===OTHER && !$('ssid').value) ? undefined : $('ssid_sel').value; fillNets(keep);
+  try { nets = (await get('/api/scan')).sort((a,b)=>b.rssi-a.rssi); } catch(e){ scanErr = true; }
+  scanning = false; $('scanbtn').disabled = false; $('scanbtn').textContent='Rescan'; fillNets(keep); }
+async function joinWifi(){ const ssid = chosenSsid(), host = $('hostname').value, pass = $('pass').value; if (!ssid) return;
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(host)) { $('wmsg').textContent='Hostname: letters, digits and hyphens, not starting or ending with a hyphen.'; return; }
+  const b = {ssid, hostname:host}; if (pass || ssid !== cfg.wifi_ssid) b.pass = pass;
+  const old = cfg.hostname, onAp = st.wifi && st.wifi.mode==='ap';
+  $('wmsg').textContent = 'Saving…'; const j = await post('/api/wifi', b, 'wmsg'); if (!j) return;
+  cfg.wifi_ssid = j.ssid; cfg.hostname = j.hostname; $('pass').value=''; fillNets(); hostHint();
+  const url = 'http://'+j.hostname+'.local/';
+  if (onAp) $('wmsg').textContent = 'Saved. Joining '+j.ssid+': once it is on, this setup network goes away. Connect to '+j.ssid+' and open '+url;
+  else if (j.hostname !== old && location.hostname === old+'.local') { $('wmsg').textContent = 'Saved. Rejoining '+j.ssid+' as '+j.hostname+': this page moves to '+url+' in a few seconds.'; setTimeout(()=>{ location.href = url; }, 8000); }
+  else $('wmsg').textContent = 'Saved. Rejoining '+j.ssid+(j.hostname !== old ? ' as '+j.hostname : '')+'…'; }
+function showWifi(w){ const host = cfg.hostname, link = `<a href="http://${esc(host)}.local/">http://${esc(host)}.local</a>`; let h;
+  if (w.connected) h = `<span class="ok">●</span> Connected to <b>${esc(w.ssid)}</b> · ${esc(w.ip)} · ${w.rssi} dBm · ${link}`;
+  else if (w.mode==='ap') h = `<span class="bad">●</span> Not on a network. The board's own setup network <b>${esc(w.ssid)}</b> is up (${esc(w.ip)}).`+(cfg.wifi_ssid ? ` Still trying <b>${esc(cfg.wifi_ssid)}</b>.` : ' Pick a network below.');
+  else h = `<span class="bad">●</span> `+(cfg.wifi_ssid ? `Joining <b>${esc(cfg.wifi_ssid)}</b>…` : 'Not on a network.');
+  if ($('wstate').innerHTML !== h) $('wstate').innerHTML = h; }
+
+function drawRing(hex, n){
+  const c=$('ring'), g=c.getContext('2d'), W=c.width, H=c.height; g.fillStyle='#000'; g.fillRect(0,0,W,H);
+  if(!cfg||!n) return;
+  const t=cfg.top,r=cfg.right,b=cfg.bottom,l=cfg.left; const m=14, d=22; let i=0;
+  const px=k=>'#'+hex.substr(k*6,6);
+  // each cell spans [k/count, (k+1)/count] of the run; both ends rounded to whole pixels so cells tile without seams
+  const seg=(count, x0,y0,x1,y1, w,h)=>{ for(let k=0;k<count;k++,i++){ const f=k/count, f2=(k+1)/count;
+    const ax=Math.round(x0+(x1-x0)*f), bx=Math.round(x0+(x1-x0)*f2), ay=Math.round(y0+(y1-y0)*f), by=Math.round(y0+(y1-y0)*f2);
+    g.fillStyle=px(i); g.fillRect(Math.min(ax,bx), Math.min(ay,by), w||Math.abs(bx-ax), h||Math.abs(by-ay)); } };
+  // Each bar spans exactly the image edge it samples (zone layout: top/bottom LEDs split the image width,
+  // left/right LEDs split the image height). No LED sits in a corner, so the corners stay black.
+  seg(t, m+d, m, W-m-d, m, 0, d);             // top, left->right
+  seg(r, W-m-d, m+d, W-m-d, H-m-d, d, 0);     // right, top->bottom
+  seg(b, W-m-d, H-m-d, m+d, H-m-d, 0, d);     // bottom, right->left (drawn with negative width)
+  seg(l, m, H-m-d, m, m+d, d, 0);             // left, bottom->top
+  g.fillStyle='#161616'; g.fillRect(m+d, m+d, W-2*m-2*d, H-2*m-2*d);
+}
+async function tickLeds(){ try { const j = await get('/api/leds'); drawRing(j.hex, j.n); } catch(e){} setTimeout(tickLeds, 150); }
+async function tickStatus(){ try { const s = await get('/api/status'); st = s; showOutput(); if (document.activeElement !== $('ovr')) $('ovr').value = s.out_rgb;
+  const w=s.wifi; $('net').innerHTML = `<span class="${w.connected?'ok':'bad'}">${esc(w.mode.toUpperCase())} ${esc(w.ssid)} ${esc(w.ip)}${w.connected?' '+w.rssi+' dBm':''}</span>`; showWifi(w);
+  const rows = [['USB grabber', s.usb_connected?'<span class=ok>connected</span>':'<span class=bad>not found</span>'],['Capture', s.capture_w ? `${s.capture_w}×${s.capture_h} MJPEG at ${+s.capture_fps.toFixed(1)} fps (USB)` : '—'],['Frames', s.frames_total],['Decoded fps', s.fps.toFixed(1)],['Decode / pipeline', s.decode_ms.toFixed(1)+' / '+s.pipeline_ms.toFixed(1)+' ms'],['CPU core 0 / 1', s.cpu0+' % / '+s.cpu1+' %'],['HDR tone map', s.hdr_active?'on':'off'],['Black border', s.border_h<0?'unknown':`h ${s.border_h} v ${s.border_v} cells`],['Signal', s.no_signal?'<span class=bad>none</span>':'<span class=ok>ok</span>'],['LEDs / grid', `${s.n_leds} / ${s.grid_w}×${s.grid_h}`],['Firmware', s.build+' ('+s.slot+')'],['Free PSRAM / heap', (s.free_psram/1024|0)+' / '+(s.free_heap/1024|0)+' KiB'],['Uptime', (s.uptime_s/3600|0)+'h '+((s.uptime_s%3600)/60|0)+'m'],['Last restart', s.last_restart||'?']];
+  $('stat').innerHTML = rows.map(([k,v])=>`<span>${k}</span><span>${v}</span>`).join(''); } catch(e){ $('net').textContent='offline'; } setTimeout(tickStatus, 1000); }
+function tickFrame(){ const im=$('frame'); const next=()=>setTimeout(tickFrame, 400); im.onload=next; im.onerror=()=>setTimeout(tickFrame, 1500); im.src='/api/frame.jpg?t='+Date.now(); }
+let logPos = 0;
+async function tickLog(){ try { const r = await fetch('/api/log?since='+logPos); const t = await r.text(); const n = r.headers.get('X-Log-Next'); if (n) logPos = Number(n);
+  if (t) { const el=$('log'); const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 4; el.textContent = (el.textContent + t).slice(-30000); if (stick) el.scrollTop = el.scrollHeight; } } catch(e){} setTimeout(tickLog, 1000); }
+async function uploadFw(f){ if (!f) return; if (!confirm('Upload '+f.name+' ('+f.size+' bytes) and reboot?')) return; $('msg').textContent='uploading…';
+  try { const r = await fetch('/api/update',{method:'POST',headers:{'content-type':'application/octet-stream'},body:f}); const j = await r.json(); $('msg').textContent = j.ok ? 'written to '+j.slot+', rebooting' : 'update failed'; } catch(e){ $('msg').textContent='upload error: '+e.message; } }
+/* oneboard design only: /api/board does not exist on dev kits, and both of its sections stay hidden */
+const yn = (v, y, n) => v ? `<span class=ok>${y}</span>` : `<span class=bad>${n}</span>`;
+async function tickBoard(){ let b; try { b = await get('/api/board'); } catch(e){ return; }
+  if ($('usbsec').style.display) { $('usbsec').style.display = ''; usbPoll(); }
+  $('boardsec').style.display = '';
+  const g=b.splitter, i=g.input, a=g.output_a_tv, o=g.output_b_ms2130, c=b.cec, m=b.ms2130;
+  const out = x => x.connected ? `<span class=ok>connected</span>${x.downscaled?', downscaled':''}${x.hdcp?', HDCP':''}` : `<span class=bad>not connected</span> (state ${x.plug_state})`;
+  const rows = [['Splitter', g.found ? `<span class=ok>running</span>, tick ${g.tick_ms} ms, ${g.i2c_errors} I2C errors` : '<span class=bad>not found on I2C</span>'],
+    ['HDMI input', !i.cable_5v ? '<span class=bad>no source</span>' : i.locked ? `<span class=ok>${i.width}x${i.height}</span>, VIC ${i.vic}${i.hdcp?', HDCP':''}` : 'source present, not locked'],
+    ['Output to TV', out(a)], ['Output to capture chip', out(o)], ['EDID shown to the source', g.edid_from_tv ? "the TV's" : 'built-in default'],
+    ['Capture chip', yn(m.core_power, 'powered', 'core off') + ', ' + yn(m.usb_streaming, 'streaming', 'not streaming')],
+    ['TV', `${c.tv === 'on' ? '<span class=ok>on</span>' : c.tv === 'off' ? '<span class=bad>off</span>' : c.tv}${c.frames ? `, ${c.frames} CEC frames heard, last ${c.last_frame}` : ''}`]];
+  $('bstat').innerHTML = rows.map(([k,v])=>`<span>${k}</span><span>${v}</span>`).join('');
+  if (document.activeElement !== $('cec_follow')) $('cec_follow').value = c.follow ? '1' : '0';
+  setTimeout(tickBoard, 2000); }
+async function bpost(u, body){ $('bmsg').textContent = '…'; try { const r = await fetch(u, {method:'POST', headers:{'content-type':'application/octet-stream'}, body}); const j = await r.json().catch(()=>({})); $('bmsg').textContent = j.message || j.error || (r.ok ? 'ok' : 'failed: '+r.status); return j; } catch(e){ $('bmsg').textContent = 'error: '+e.message; } }
+function setCec(k, v){ bpost('/api/cec?'+k+'='+v); }
+function tvPower(v){ bpost('/api/cec?tv='+v); }
+async function spiId(){ $('bmsg').textContent = '…'; try { const j = await get('/api/ms2130/flash?id=1'); $('bmsg').textContent = j.ok ? 'flash answers: JEDEC id '+j.jedec : (j.error||'no answer')+' (id '+j.jedec+')'; } catch(e){ $('bmsg').textContent = 'error: '+e.message; } }
+function spiWrite(f){ if (f && confirm('Erase the capture chip\'s flash and write '+f.name+' ('+f.size+' bytes) over SPI?')) bpost('/api/ms2130/flash', f); }
+/* capture chip flash over USB: a background job on the board, polled while it runs */
+async function usbPoll(){ let j; try { j = await get('/api/ms2130/usb'); } catch(e){ return; }
+  $('usbdump').style.display = j.have_dump ? '' : 'none';
+  $('usbmsg').textContent = j.state === 'running' ? `${j.stage} ${j.pct} %` : j.state === 'idle' ? '' : (j.state === 'failed' ? 'failed: ' : '') + j.message + (j.device ? ' ['+j.device+']' : '');
+  if (j.state === 'running') setTimeout(usbPoll, 700); }
+async function usbJob(op, f){ if (op === 'write' && (!f || !confirm('Erase the capture chip\'s flash and write '+f.name+' ('+f.size+' bytes) over USB?'))) return;
+  $('usbmsg').textContent = 'starting…';
+  try { const r = await fetch('/api/ms2130/usb?op='+op, {method:'POST', headers:{'content-type':'application/octet-stream'}, body: f}); const j = await r.json().catch(()=>({}));
+    if (!r.ok) { $('usbmsg').textContent = j.error || ('failed: '+r.status); return; } } catch(e){ $('usbmsg').textContent = 'error: '+e.message; return; }
+  usbPoll(); }
+loadCfg().then(()=>{ tickLeds(); tickStatus(); tickFrame(); tickLog(); tickBoard();
+  // look for networks once the Wi-Fi panel is on screen (a scan holds the board's web server for a few seconds)
+  new IntersectionObserver((e,o)=>{ if (e.some(x=>x.isIntersecting)) { o.disconnect(); if (!scanned) scan(); } }).observe($('ssid_sel')); });
+</script>
+</body>
+</html>

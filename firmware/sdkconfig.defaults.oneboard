@@ -1,0 +1,7 @@
+# The oneboard, revision A: GSV2001 splitter + MS2130 capture + ESP32-S31-WROOM-1-N16R16V on one PCB.
+# Used on top of sdkconfig.defaults and sdkconfig.defaults.esp32s31 by ./idf-oneboard.sh (set-target esp32s31 once, then build).
+CONFIG_HL_BOARD_ONEBOARD=y
+# Internal RAM is short on this build (about 48 KB free): a web page polling the board then stalls it for seconds.
+# Let Wi-Fi and lwIP take buffers from PSRAM and send allocations of 4 KB and up there (about 94 KB free).
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096

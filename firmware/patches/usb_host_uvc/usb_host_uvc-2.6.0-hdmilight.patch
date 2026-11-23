@@ -1,0 +1,99 @@
+hdmilight: bulk payload boundaries for the MS2130 (espressif/usb_host_uvc 2.6.0)
+
+The MS2130 sends MJPEG on a bulk endpoint in full 15,360-byte payloads. Each transfer is sized to the negotiated
+payload, and a full transfer is treated as a payload boundary as well as a short one, so the next transfer starts
+with a payload header. Applied at configure time by cmake/patched_component.cmake.
+
+--- a/private_include/uvc_types_priv.h
++++ b/private_include/uvc_types_priv.h
+@@ -56,6 +56,7 @@
+     struct {
+         uvc_host_stream_format_t vs_format;   // Format of the video stream
+         uint32_t dwMaxVideoFrameSize;         // Maximum frame size of this vs_format
++        uint32_t dwMaxPayloadTransferSize;    // Negotiated payload transfer size (hdmilight: bulk payload boundary detection)
+         uvc_host_frame_t *current_frame;      // Frame that is being written to
+         bool streaming;                       // Flag whether stream is on/off
+     } dynamic; // Dynamic members require a critical section
+--- a/uvc_bulk.c
++++ b/uvc_bulk.c
+@@ -123,6 +123,13 @@
+     const uint8_t *payload_data  = payload;
+     size_t payload_data_len      = transfer->actual_num_bytes;
+ 
++    // hdmilight patch: a payload ends with a short packet (original rule) OR when this transfer received a full
++    // payload (dwMaxPayloadTransferSize). Transfers are sized to exactly one payload (see uvc_transfers_allocate),
++    // so in the latter case the next transfer starts with a payload header even though no short packet was seen.
++    const uint32_t max_payload = UVC_ATOMIC_LOAD(uvc_stream->dynamic.dwMaxPayloadTransferSize);
++    const bool payload_end = (transfer->data_buffer_size > transfer->actual_num_bytes) ||
++                             (max_payload > 0 && transfer->actual_num_bytes >= max_payload);
++
+     // Note for developers:
+     // The order of SoF, Data, and EoF handling is intentional and represents a workaround for detecting EoF in the Bulk stream.
+     // Normally, a complete Sample transfer includes two short packets: one marking the last data packet and another with the EoF header.
+@@ -200,8 +207,8 @@
+         // Add received data to frame buffer
+         bulk_add_frame_data(uvc_stream, payload_data, payload_data_len);
+ 
+-        // We got short packet in data section, this packet is EoF
+-        if (transfer->data_buffer_size > transfer->actual_num_bytes) {
++        // We got short packet in data section (or a whole payload): the next transfer starts with a header
++        if (payload_end) {
+             uvc_stream->single_thread.next_bulk_packet = UVC_STREAM_BULK_PACKET_EOF;
+         }
+         break;
+@@ -221,8 +228,9 @@
+         const bool start_of_frame = (uvc_stream->single_thread.current_frame_id != payload_header->bmHeaderInfo.frame_id);
+ 
+         if (!start_of_frame && payload_header->bmHeaderInfo.end_of_frame == false && payload_data_len > 0) {
+-            // This is not the end of frame, we collect more data
+-            uvc_stream->single_thread.next_bulk_packet = UVC_STREAM_BULK_PACKET_DATA;
++            // This is not the end of frame, we collect more data. If this transfer itself ended the payload
++            // (short packet or a whole payload), the next transfer carries a header again.
++            uvc_stream->single_thread.next_bulk_packet = payload_end ? UVC_STREAM_BULK_PACKET_EOF : UVC_STREAM_BULK_PACKET_DATA;
+             bulk_add_frame_data(uvc_stream, payload_data + payload_header->bHeaderLength, payload_data_len - payload_header->bHeaderLength);
+             break;
+         }
+--- a/uvc_host.c
++++ b/uvc_host.c
+@@ -368,7 +368,7 @@
+  *     - ESP_ERR_NO_MEM:      Not enough memory for transfers allocation
+  *     - ESP_ERR_INVALID_ARG: Max packet size is invalid or ep_desc is NULL
+  */
+-static esp_err_t uvc_transfers_allocate(uvc_stream_t *uvc_stream, unsigned num_of_transfers, size_t transfer_size, const usb_ep_desc_t *ep_desc)
++static esp_err_t uvc_transfers_allocate(uvc_stream_t *uvc_stream, unsigned num_of_transfers, size_t transfer_size, const usb_ep_desc_t *ep_desc, uint32_t bulk_payload_size)
+ {
+     esp_err_t ret = ESP_OK;
+     UVC_CHECK(ep_desc, ESP_ERR_INVALID_ARG);
+@@ -382,6 +382,18 @@
+         max_packet_size *= (USB_EP_DESC_GET_MULT(ep_desc) + 1);
+     }
+ 
++    if (!is_isoc && bulk_payload_size > 0) {
++        // hdmilight patch: BULK streams. The bulk state machine (uvc_bulk.c) finds payload boundaries by short
++        // packets *or* by a transfer that received a whole payload. For the latter to be exact, one transfer must
++        // hold exactly one payload (dwMaxPayloadTransferSize). Cameras whose payload size is a multiple of MPS
++        // (e.g. MacroSilicon MS2130: 15360 = 30 x 512) never send a short packet mid-frame, so any other transfer
++        // size leaves 12-byte payload headers inside the frame data.
++        if (transfer_size != 0 && transfer_size != bulk_payload_size) {
++            ESP_LOGW(TAG, "BULK: using negotiated payload size %" PRIu32 " as transfer size instead of requested %zu", bulk_payload_size, transfer_size);
++        }
++        transfer_size = bulk_payload_size;
++    }
++
+     if (transfer_size == 0) {
+         // If the caller doesn't specify transfer size, we will allocate 4 MPS buffer
+         // This is a reasonable compromise between performance and memory consumption
+@@ -858,9 +870,12 @@
+         uvc_host_stream_control_probe(uvc_stream, &real_format, &vs_result),
+         err, TAG, "Failed to negotiate requested Video Stream format");
+ 
++    // hdmilight patch: remember the negotiated payload size for bulk payload boundary detection
++    uvc_stream->dynamic.dwMaxPayloadTransferSize = vs_result.dwMaxPayloadTransferSize;
++
+     // Allocate USB transfers
+     ESP_GOTO_ON_ERROR(
+-        uvc_transfers_allocate(uvc_stream, stream_config->advanced.number_of_urbs, stream_config->advanced.urb_size, ep_desc),
++        uvc_transfers_allocate(uvc_stream, stream_config->advanced.number_of_urbs, stream_config->advanced.urb_size, ep_desc, vs_result.dwMaxPayloadTransferSize),
+         err, TAG,);
+     // Allocate Frame buffers
+     ESP_GOTO_ON_ERROR(

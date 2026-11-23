@@ -1,0 +1,3 @@
+# ESP32-S31-WROOM-3 on the Function-CoreBoard-1: 16 MB octal PSRAM, Wi-Fi on-chip
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_200M=y

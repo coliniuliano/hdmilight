@@ -1,0 +1,28 @@
+dependencies:
+  idf: ">=6.1"
+  espressif/usb_host_uvc:
+    version: "2.6.0"
+    # 2.6.0 plus a bulk-payload-boundary fix for the MS2130, generated at configure time from the registry zip and
+    # patches/usb_host_uvc/*.patch (cmake/patched_component.cmake).
+    override_path: "../.patched/usb_host_uvc"
+  # Ranges take the newest compatible release. The exact versions a build used are recorded in the tracked
+  # per-target lock files (dependencies.lock.<target>), so an upgrade shows up as a diff instead of happening
+  # silently. To move to the newest releases: idf.py update-dependencies (once per target).
+  espressif/led_strip: "^3.1.0"
+  espressif/mdns: "^1.4.0"
+  # Wi-Fi on the ESP32-P4 through the board's ESP32-C6 (ESP-Hosted over SDIO), same esp_wifi API as a native radio.
+  # The S31 has its own radio and needs neither.
+  espressif/esp_wifi_remote:
+    version: "1.*"
+    rules:
+      - if: "target in [esp32p4]"
+  espressif/esp_hosted:
+    version: "3.1.0"
+    # 3.1.0 plus an SDIO RX fix for the C6 firmware the P4 dev kits ship, generated the same way from
+    # patches/esp_hosted/*.patch (patches/esp_hosted/README.md says why). main/CMakeLists.txt refuses to build the
+    # P4 image without it.
+    override_path: "../.patched/esp_hosted"
+    rules:
+      - if: "target in [esp32p4]"
+  # cJSON left ESP-IDF in v6.0
+  espressif/cjson: "^1.7.19"

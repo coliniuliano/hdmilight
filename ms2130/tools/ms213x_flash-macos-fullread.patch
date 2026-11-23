@@ -1,0 +1,22 @@
+diff --git a/ms213x_flash.c b/ms213x_flash.c
+index 3ee958d..a6d2f87 100644
+--- a/ms213x_flash.c
++++ b/ms213x_flash.c
+@@ -96,7 +96,7 @@ void print_progress(double ratio)
+ int open_device(void)
+ {
+ 	for (unsigned int i = 0; i < sizeof(known_devices)/sizeof(adapter_t); i++ ) {
+-#ifndef WIN32
++#if !defined(WIN32) && !defined(__APPLE__)
+ 		devh = libusb_open_device_with_vid_pid(NULL, known_devices[i].vid, known_devices[i].pid);
+ 		if (devh) {
+ 			device = &known_devices[i];
+@@ -552,7 +552,7 @@ int backup_fw_to_file(char *filename, size_t flash_size)
+ 	if (!fp) {
+ 		fprintf(stderr, "Error opening file\n");
+ 	} else {
+-		size_t file_size = is_ms213xs ? flash_size : (code_len + HEADER_LEN + CHECKSUM_LEN);
++		size_t file_size = flash_size;   /* full flash: keeps the EDID / HDCP user data at 0xF830+ */
+ 		size_t written = fwrite(fw, 1, file_size, fp);
+ 		if (written != file_size) {
+ 			fprintf(stderr, "Error writing backup file!\n");
